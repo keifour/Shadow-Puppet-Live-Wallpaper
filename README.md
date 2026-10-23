@@ -69,4 +69,12 @@ npm run dist:win:zip
 
 `.github/workflows/release-windows.yml` 使用 GitHub 自动生成的 `GITHUB_TOKEN`，无需个人令牌或 `GH_RELEASE_TOKEN`。在 Windows 运行器上执行安装、语法检查、算法测试，生成 NSIS 安装程序、ZIP 和 SHA256 校验文件，再上传并发布预发布版。
 
-推送 `vX.Y.Z` 标签或从 Actions 手动运行并填写已有版本标签即可。修改发布工作流并推送 main 也会为当前 package.json 版本执行一次发布。标签必须已存在且与该标签中的 package.json 版本一致。构建基于标签代码；重新运行会替换同名附件。仓库需启用 Actions，并允许该工作流使用 `contents: write`。自动构建不替代真实 Windows 摄像头与桌面模式测试。
+推送 `vX.Y.Z` 标签或从 Actions 手动运行并填写已有版本标签即可。发布仅由版本标签或手动运行触发，普通代码推送不会覆盖已有附件。标签必须已存在且与该标签中的 package.json 版本一致。构建基于标签代码；重新运行会替换同名附件。仓库需启用 Actions，并允许该工作流使用 `contents: write`。自动构建不替代真实 Windows 摄像头与桌面模式测试。
+
+## v0.3 抽象皮影与桌面兼容
+
+“皮影演绎”支持剪纸影身（OpenCV 多边形简化与镂空纹理）、山林灵鹿（程序化鹿形、关节摆动、跟随轮廓重心）、粒子水墨（将剪影打散成流动墨点）。灵鹿是由动作驱动的皮影角色，不声称识别画面中的动物；没有摄像头时可用鼠标预览这些演绎。背景配色与演绎模式分别控制。
+
+桌面宿主查找同时支持传统同级 WorkerW 和新版 Progman 内部的 WorkerW / 图标图层。新版布局使用不透明分层子窗口，排在图标后方；失败会尝试恢复原始父窗口、样式与位置。坐标按物理像素映射到宿主，兼容桌面缩放。原生助手使用 UTF-8 JSON 返回结果，界面不再直接展示本地化 PowerShell 异常文本。
+
+Windows CI 执行 `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/desktop-native.ps1`，验证两种布局选择、真实合成 HWND 的挂载/还原、图标层级、窗口样式、屏幕坐标、失败回滚和错误协议。合成窗口测试不能代替用户当前 Explorer 布局和真实摄像头的实机测试。如果资源管理器未运行或未生成兼容图层，应用会保留窗口预览并显示明确提示，不会用覆盖桌面图标的全屏窗口冒充壁纸模式。

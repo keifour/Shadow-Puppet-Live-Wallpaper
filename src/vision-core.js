@@ -44,7 +44,13 @@
               if (size < minArea) continue;
               const m = cv.moments(contour, false);
               if (m.m00 === 0) continue;
-              cv.drawContours(this.mask, contours, i, new cv.Scalar(255), -1);
+              // Approximate each contour into a cut-paper polygon instead of mirroring noisy video edges.
+              const polygon = new cv.Mat(), cutouts = new cv.MatVector();
+              try {
+                cv.approxPolyDP(contour, polygon, 1.8, true);
+                cutouts.push_back(polygon);
+                cv.drawContours(this.mask, cutouts, 0, new cv.Scalar(255), -1);
+              } finally { cutouts.delete(); polygon.delete(); }
               area += size; xsum += m.m10; ysum += m.m01; count++;
             } finally { contour.delete(); }
           }

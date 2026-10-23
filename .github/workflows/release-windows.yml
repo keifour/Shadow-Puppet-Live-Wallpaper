@@ -3,14 +3,12 @@ name: Build and publish Windows release
 on:
   push:
     tags: ['v*']
-    branches: [main]
-    paths: ['.github/workflows/release-windows.yml']
   workflow_dispatch:
     inputs:
       tag:
         description: 'Existing version tag, for example v0.2.0'
         required: true
-        default: 'v0.2.0'
+        default: 'v0.3.0'
 
 permissions:
   contents: write
@@ -53,6 +51,15 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run check
       - run: npm test
+      - name: Test native desktop compatibility
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/desktop-native.ps1 2>&1 | Tee-Object -FilePath native-tests.log
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) {
+            $message = ((Get-Content native-tests.log -Tail 40) -join "`n").Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Native desktop tests::$message"
+            exit $testExit
+          }
       - name: Build Windows installer and ZIP
         run: |
           & npx --no-install electron-builder --win nsis zip --x64 --publish never 2>&1 | Tee-Object -FilePath build-windows.log

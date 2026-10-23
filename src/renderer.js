@@ -5,13 +5,15 @@ const mask = $('mask'), ctx = mask.getContext('2d', { willReadFrequently: true }
 const capture = document.createElement('canvas'); capture.width = 192; capture.height = 144;
 const cc = capture.getContext('2d', { willReadFrequently: true });
 let stream, theme = 0, sensitivity = .55, intensity = .7, paused = false, pointer = [.5, .5], motion = 0, cameraBusy = false;
+let puppetMode = 0, presence = 0, facing = 1, previousCenter = .5;
 let noticeTimer;
 function notice(text) { $('notice').textContent = text; $('notice').style.display = 'block'; clearTimeout(noticeTimer); noticeTimer = setTimeout(() => $('notice').style.display = 'none', 7000); }
 if (!gl) { notice('WebGL 不可用，请确认显卡驱动与硬件加速已启用。'); throw new Error('WebGL unavailable'); }
 const vertex = 'attribute vec2 p; void main(){gl_Position=vec4(p,0.,1.);}';
 const fragment = `precision mediump float;
 uniform vec2 resolution, pointer;
-uniform float time, theme, intensity, motion, camera;
+uniform float time, theme, intensity, motion, camera, puppetMode, presence, facing;
+${window.puppetShader}
 uniform sampler2D silhouette;
 float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
@@ -22,7 +24,28 @@ vec3 col=vec3(.022,.045,.058);float moon=length((uv-vec2(.60,.68))*vec2(aspect,1
 for(int i=0;i<5;i++){float layer=float(i);float h=.18+layer*.075+mountain(uv.x+layer*.34,layer+2.);float fill=1.-smoothstep(h,h+.003,uv.y);col=mix(col,tint*(.035+(.11-layer*.014)),fill*.85);float ridge=exp(-abs(uv.y-h)*420.);col+=tint*ridge*.12;}
 float water=1.-smoothstep(.21,.24,uv.y);float waves=sin(uv.y*210.+sin(uv.x*13.+time*.15)*2.+time*.6);col+=tint*water*max(waves,0.)*.028;
 vec2 delta=(uv-pointer)*vec2(aspect,1.);float d=length(delta);float ripple=exp(-d*4.)*pow(max(sin(d*48.-time*1.8),0.),12.);col+=tint*ripple*(.08+motion*.8)*intensity;
-vec2 suv=vec2(uv.x,1.-uv.y);float shape=texture2D(silhouette,suv).r;float edge=abs(shape-texture2D(silhouette,suv+vec2(.006,0.)).r)+abs(shape-texture2D(silhouette,suv+vec2(0.,.007)).r);col+=tint*(shape*.2+edge*.75)*camera*intensity;
+vec2 suv=vec2(uv.x,1.-uv.y);
+float shape=texture2D(silhouette,suv).r;
+vec2 actor=(uv-pointer)*vec2(aspect,1.);actor.x*=facing;
+if(camera<.5)shape=figureShape(actor,time);
+float edge=abs(shape-texture2D(silhouette,suv+vec2(.006,0.)).r)+abs(shape-texture2D(silhouette,suv+vec2(0.,.007)).r);
+if(puppetMode<.5){
+  vec2 tile=fract(suv*vec2(28.,20.))-.5;
+  float piercing=1.-smoothstep(.10,.15,length(tile));
+  float paper=shape*(1.-piercing*.85);
+  vec3 paperColor=mix(tint,vec3(.94,.56,.24),.35);
+  col+=paperColor*paper*.50*intensity+tint*edge*.28*camera*intensity;
+}else if(puppetMode<1.5){
+  float deer=deerShape(actor,time,motion);
+  float rod=limb(actor,vec2(0.,-.07),vec2(0.,-.42),.0015);
+  col+=mix(tint,vec3(.93,.63,.30),.5)*deer*.85*intensity*presence;
+  col+=tint*rod*.08*presence;
+}else{
+  vec2 dots=fract(suv*vec2(105.,78.)+vec2(sin(time*.4+suv.y*20.)*.4,0.))-.5;
+  float ink=1.-smoothstep(.12,.36,length(dots));
+  col+=tint*shape*ink*(.45+motion*.7)*intensity;
+  col+=tint*edge*camera*.12*intensity;
+}
 vec2 grid=p*vec2(40.,24.);vec2 cell=floor(grid);float rnd=hash(cell);vec2 pos=fract(grid)-.5;pos.y+=sin(time*.3+rnd*20.)*.3;float particle=exp(-length(pos)*90.);col+=tint*particle*step(.92,rnd)*(.4+motion*2.);
 col+=tint*.017*noise(p*5.+vec2(time*.025,0.));float vignette=1.-.3*length(uv-.5);gl_FragColor=vec4(col*vignette,1.);}`;
 function shader(type, source) { const s = gl.createShader(type); gl.shaderSource(s, source); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { notice('着色器编译失败，请更新显卡驱动。'); throw new Error(gl.getShaderInfoLog(s)); } return s; }
@@ -30,7 +53,7 @@ const program = gl.createProgram(); gl.attachShader(program, shader(gl.VERTEX_SH
 if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
 gl.useProgram(program); const buffer = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buffer); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]), gl.STATIC_DRAW);
 const position = gl.getAttribLocation(program, 'p'); gl.enableVertexAttribArray(position); gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
-const uniforms = Object.fromEntries(['resolution','pointer','time','theme','intensity','motion','camera','silhouette'].map(n=>[n, gl.getUniformLocation(program,n)]));
+const uniforms = Object.fromEntries(['resolution','pointer','time','theme','intensity','motion','camera','silhouette','puppetMode','presence','facing'].map(n=>[n, gl.getUniformLocation(program,n)]));
 const texture = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, texture); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); gl.uniform1i(uniforms.silhouette,0);
 ctx.fillStyle='#000'; ctx.fillRect(0,0,192,144);
 let visionWorker = null, visionReady = false, visionBusy = false, visionTimer;
@@ -71,7 +94,11 @@ function startVision() {
       ctx.putImageData(out, 0, 0);
       mask.dataset.contours = String(data.count); mask.dataset.coverage = String(data.coverage);
       motion = motion * .7 + Math.min(data.coverage * 5, 1) * .3;
+      presence = presence * .75 + (data.count > 0 ? 1 : 0) * .25;
       if (data.centroid) {
+        const velocity = data.centroid[0] - previousCenter;
+        if (Math.abs(velocity) > .006) facing = velocity > 0 ? 1 : -1;
+        previousCenter = data.centroid[0];
         pointer[0] = pointer[0] * .7 + data.centroid[0] * .3;
         pointer[1] = pointer[1] * .7 + data.centroid[1] * .3;
       }
@@ -85,7 +112,7 @@ function startVision() {
 function stopCamera(message = '演示模式 · 移动鼠标，唤起涟漪') {
   const active = stream; stream = null;
   active?.getTracks().forEach(t => t.stop()); $('video').srcObject = null;
-  stopVision(); motion = 0; ctx.fillStyle = '#000'; ctx.fillRect(0,0,192,144);
+  stopVision(); motion = 0; presence = 0; ctx.fillStyle = '#000'; ctx.fillRect(0,0,192,144);
   $('camera').textContent = '开启摄像头 ↗'; $('camera-label').textContent = '摄像头尚未开启';
   $('status').textContent = message; $('status-dot').classList.remove('live');
 }
@@ -120,6 +147,7 @@ function analyze() {
     visionWorker.postMessage({ type: 'frame', buffer: input.data.buffer, sensitivity }, [input.data.buffer]);
   } catch (error) { stopCamera(); notice(`摄像头画面分析失败：${error.message}`); }
 }
+$('puppet-mode').onchange = event => { puppetMode = Number(event.target.value); };
 document.querySelectorAll('.theme').forEach(button=>button.onclick=()=>{ theme=Number(button.dataset.theme);document.querySelector('.theme.active').classList.remove('active');button.classList.add('active');});
 for(const name of ['sensitivity','intensity']) $(name).oninput=e=>{ const value=Number(e.target.value);$(name+'-value').textContent=value+'%';if(name==='sensitivity')sensitivity=value/100;else intensity=value/100;};
 window.addEventListener('pointermove',e=>{if(!stream){pointer=[e.clientX/innerWidth,1-e.clientY/innerHeight];motion=.25;}});
@@ -132,5 +160,5 @@ canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();stopCamera();n
 let last=0,lastAnalyze=0,frames=0,fpsStart=0,elapsed=0;
 function frame(now){requestAnimationFrame(frame);if(now-last<1000/30)return;const dt=Math.min((now-last)/1000,.1);last=now;if(paused)return;elapsed+=dt;if(now-lastAnalyze>1000/15){analyze();lastAnalyze=now;}if(!stream)motion*=.97;
 const scale=Math.min(devicePixelRatio,1.5);const w=Math.round(innerWidth*scale),h=Math.round(innerHeight*scale);if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;gl.viewport(0,0,w,h);}
-gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,mask);gl.uniform2f(uniforms.resolution,w,h);gl.uniform2f(uniforms.pointer,...pointer);gl.uniform1f(uniforms.time,elapsed);gl.uniform1f(uniforms.theme,theme);gl.uniform1f(uniforms.intensity,intensity);gl.uniform1f(uniforms.motion,motion);gl.uniform1f(uniforms.camera,stream?1:0);gl.drawArrays(gl.TRIANGLES,0,6);frames++;if(now-fpsStart>1000){$('fps').textContent=Math.round(frames*1000/(now-fpsStart))+' FPS';frames=0;fpsStart=now;}}
+gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,mask);gl.uniform2f(uniforms.resolution,w,h);gl.uniform2f(uniforms.pointer,...pointer);gl.uniform1f(uniforms.time,elapsed);gl.uniform1f(uniforms.theme,theme);gl.uniform1f(uniforms.intensity,intensity);gl.uniform1f(uniforms.motion,motion);gl.uniform1f(uniforms.camera,stream?1:0);gl.uniform1f(uniforms.puppetMode,puppetMode);gl.uniform1f(uniforms.presence,stream?presence:1);gl.uniform1f(uniforms.facing,facing);gl.drawArrays(gl.TRIANGLES,0,6);frames++;if(now-fpsStart>1000){$('fps').textContent=Math.round(frames*1000/(now-fpsStart))+' FPS';frames=0;fpsStart=now;}}
 requestAnimationFrame(frame);

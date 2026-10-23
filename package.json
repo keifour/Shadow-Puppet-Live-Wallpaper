@@ -1,15 +1,15 @@
 {
   "name": "shadow-puppet-live-wallpaper",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "本地摄像头驱动的赛博水墨皮影桌面",
   "main": "src/main.cjs",
   "scripts": {
     "start": "electron .",
-    "check": "node --check src/main.cjs && node --check src/preload.cjs && node --check src/renderer.js && node --check src/vision-core.js && node --check src/vision-worker.js",
+    "check": "node --check src/main.cjs && node --check src/preload.cjs && node --check src/renderer.js && node --check src/vision-core.js && node --check src/vision-worker.js && node --check src/wallpaper-bridge.cjs && node --check src/puppet-shader.js",
     "dist:win": "electron-builder --win nsis --x64",
     "dist:win:zip": "electron-builder --win zip --x64 --config.win.signAndEditExecutable=false",
     "postinstall": "node scripts/prepare-opencv.cjs",
-    "test": "node --test tests/vision.test.cjs",
+    "test": "node --test tests/*.test.cjs",
     "test:ui": "node tests/renderer-smoke.cjs"
   },
   "devDependencies": {
@@ -35,6 +35,10 @@
       {
         "from": "scripts/wallpaper.ps1",
         "to": "wallpaper.ps1"
+      },
+      {
+        "from": "scripts/DesktopHost.cs",
+        "to": "DesktopHost.cs"
       }
     ]
   }

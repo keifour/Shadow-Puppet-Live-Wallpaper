@@ -26,6 +26,15 @@ const { chromium } = require('playwright-core');
     page.on('pageerror', error => errors.push(error.message));
     page.on('console', msg => { if (msg.type() === 'error') console.error('Browser:', msg.text()); });
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
+    const modeImages = [];
+    await page.mouse.move(780, 400);
+    for (const mode of ['0', '1', '2']) {
+      await page.locator('#puppet-mode').selectOption(mode);
+      await page.waitForTimeout(400);
+      modeImages.push(await page.locator('#scene').screenshot({ path: path.join(require('node:os').tmpdir(), `shadow-puppet-mode-${mode}.png`) }));
+    }
+    assert.ok(!modeImages[0].equals(modeImages[1]) && !modeImages[1].equals(modeImages[2]), 'puppet modes should render different scenes');
+    await page.locator('#puppet-mode').selectOption('0');
     await page.locator('#camera').click();
     await page.waitForFunction(() => document.querySelector('#vision-state').textContent.includes('轮廓追踪'), null, { timeout: 45000 }).catch(async error => { console.error(await page.locator('#notice').textContent(), await page.locator('#vision-state').textContent()); throw error; });
     await page.waitForFunction(() => Number(document.querySelector('#mask').dataset.contours) > 0);

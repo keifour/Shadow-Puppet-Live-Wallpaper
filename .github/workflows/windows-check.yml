@@ -1,0 +1,33 @@
+name: Windows native compatibility checks
+on:
+  push:
+    branches: [main]
+    paths: ['scripts/**', 'src/**', 'tests/**', 'package*.json', '.github/workflows/windows-check.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+      - name: Native desktop tests
+        shell: pwsh
+        run: |
+          & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File tests/desktop-native.ps1 2>&1 | Tee-Object -FilePath native-tests.log
+          $testExit = $LASTEXITCODE
+          if ($testExit -ne 0) {
+            $message = ((Get-Content native-tests.log -Tail 40) -join "`n").Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Native desktop tests::$message"
+            exit $testExit
+          }

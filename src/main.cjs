@@ -1,13 +1,22 @@
 const { app, BrowserWindow, ipcMain, session, Tray, Menu, nativeImage, screen } = require('electron');
 const path = require('node:path');
 const { execFile } = require('node:child_process');
+const { parseHelperResult } = require('./wallpaper-bridge.cjs');
 let win, tray, wallpaper = false, busy = false, quitting = false, priorBounds;
 const page = path.join(__dirname, 'index.html');
 function nativeAttach(attach) {
   return new Promise((resolve, reject) => {
     const handle = win.getNativeWindowHandle();
     const hwnd = handle.length === 8 ? handle.readBigUInt64LE().toString() : handle.readUInt32LE().toString();
-    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', (app.isPackaged ? path.join(process.resourcesPath, 'wallpaper.ps1') : path.join(__dirname, '../scripts/wallpaper.ps1')), '-WindowHandle', hwnd, '-Attach', attach ? '1' : '0'], { windowsHide: true, timeout: 15000 }, (err, stdout, stderr) => err ? reject(new Error(stderr || err.message)) : resolve(stdout));
+    const display = screen.getPrimaryDisplay();
+    const bounds = screen.dipToScreenRect(win, display.bounds);
+    const script = app.isPackaged ? path.join(process.resourcesPath, 'wallpaper.ps1') : path.join(__dirname, '../scripts/wallpaper.ps1');
+    const args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script,
+      '-WindowHandle', hwnd, '-Attach', attach ? '1' : '0',
+      '-Left', String(bounds.x), '-Top', String(bounds.y), '-Width', String(bounds.width), '-Height', String(bounds.height)];
+    execFile('powershell.exe', args, { windowsHide: true, timeout: 15000, encoding: 'utf8' }, (error, stdout) => {
+      try { resolve(parseHelperResult(stdout, error)); } catch (failure) { reject(failure); }
+    });
   });
 }
 async function toggleWallpaper() {
@@ -19,7 +28,6 @@ async function toggleWallpaper() {
       priorBounds = win.getBounds();
       await nativeAttach(true);
       wallpaper = true;
-      win.setBounds(screen.getPrimaryDisplay().bounds);
       win.setSkipTaskbar(true);
       win.webContents.send('wallpaper-state', true);
     } else {
