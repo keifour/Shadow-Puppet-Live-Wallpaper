@@ -1,0 +1,98 @@
+name: Build and publish Windows release
+
+on:
+  push:
+    tags: ['v*']
+    branches: [main]
+    paths: ['.github/workflows/release-windows.yml']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag, for example v0.2.0'
+        required: true
+        default: 'v0.2.0'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-release
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Select exact release tag
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $tag = $env:INPUT_TAG
+          if (-not $tag -and $env:REF_TYPE -eq 'tag') { $tag = $env:REF_NAME }
+          if (-not $tag) { $tag = 'v' + (Get-Content package.json -Raw | ConvertFrom-Json).version }
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') { throw 'Expected a version tag such as v0.2.0' }
+          git checkout --detach "refs/tags/$tag"
+          if ($LASTEXITCODE -ne 0) { throw 'Release tag must already exist' }
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($tag -ne "v$version") { throw 'Tag and package version differ' }
+          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+      - name: Build Windows installer and ZIP
+        run: npx --no-install electron-builder --win nsis zip --x64
+      - name: Generate checksums and verify outputs
+        run: |
+          $files = @(Get-ChildItem dist -File | Where-Object { $_.Extension -in '.exe', '.zip' })
+          if (@($files | Where-Object Extension -eq '.exe').Count -ne 1) { throw 'Missing installer' }
+          if (@($files | Where-Object Extension -eq '.zip').Count -ne 1) { throw 'Missing ZIP' }
+          $sums = $files | Sort-Object Name | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)"
+          }
+          $sums | Set-Content dist/SHA256SUMS.txt -Encoding utf8
+      - name: Keep build artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-release
+          path: |
+            dist/*.exe
+            dist/*.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+      - name: Upload and publish preview release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -ne 0) {
+            @'
+          Windows 桌面 OpenCV 预览版。在 GitHub Windows 运行器上构建，已执行语法检查和 OpenCV 算法测试。
+
+          完整解压 ZIP 后运行 Shadow Puppet.exe，或使用 Setup 安装程序。首次开启摄像头时请暂时离开画面，等待背景采集。关闭窗口会驻留托盘，彻底退出请使用托盘菜单。
+
+          未签名；Windows 真实摄像头、托盘和 WorkerW 桌面挂载/还原仍需实机验证。自动构建成功不代表这些功能已经验证。
+          '@ | Set-Content release-notes.md -Encoding utf8
+            gh release create $env:RELEASE_TAG --verify-tag --draft --prerelease --title "$env:RELEASE_TAG · OpenCV Windows 预览版" --notes-file release-notes.md
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create release draft' }
+          }
+          $assets = @(Get-ChildItem dist -File | Where-Object { $_.Extension -in '.exe', '.zip' -or $_.Name -eq 'SHA256SUMS.txt' } | ForEach-Object FullName)
+          gh release upload $env:RELEASE_TAG @assets --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed; leaving draft unchanged' }
+          gh release edit $env:RELEASE_TAG --draft=false --prerelease
+          if ($LASTEXITCODE -ne 0) { throw 'Assets uploaded but publication failed' }

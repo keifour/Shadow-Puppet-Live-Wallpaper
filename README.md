@@ -64,3 +64,9 @@ npm run dist:win:zip
 - 分析目标约 15 FPS，WebGL 限帧约 30 FPS，实际性能取决于设备。
 - 渲染页面保持沙箱与上下文隔离，页面无 Node.js 权限；OpenCV WASM 在独立 Worker 中运行，运行时资产随安装包分发。
 - Windows 实机摄像头、Electron 权限、托盘和 WorkerW 挂载/还原尚未验证；Linux 算法与渲染验证不能替代这些检查。
+
+## GitHub 自动发布
+
+`.github/workflows/release-windows.yml` 使用 GitHub 自动生成的 `GITHUB_TOKEN`，无需个人令牌或 `GH_RELEASE_TOKEN`。在 Windows 运行器上执行安装、语法检查、算法测试，生成 NSIS 安装程序、ZIP 和 SHA256 校验文件，再上传并发布预发布版。
+
+推送 `vX.Y.Z` 标签或从 Actions 手动运行并填写已有版本标签即可。修改发布工作流并推送 main 也会为当前 package.json 版本执行一次发布。标签必须已存在且与该标签中的 package.json 版本一致。构建基于标签代码；重新运行会替换同名附件。仓库需启用 Actions，并允许该工作流使用 `contents: write`。自动构建不替代真实 Windows 摄像头与桌面模式测试。
