@@ -54,7 +54,16 @@ jobs:
       - run: npm run check
       - run: npm test
       - name: Build Windows installer and ZIP
-        run: npx --no-install electron-builder --win nsis zip --x64
+        run: |
+          & npx --no-install electron-builder --win nsis zip --x64 2>&1 | Tee-Object -FilePath build-windows.log
+          $buildExit = $LASTEXITCODE
+          if ($buildExit -ne 0) {
+            $message = (Get-Content build-windows.log -Tail 60) -join "`n"
+            if ($message.Length -gt 12000) { $message = $message.Substring($message.Length - 12000) }
+            $message = $message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows packaging::$message"
+            exit $buildExit
+          }
       - name: Generate checksums and verify outputs
         run: |
           $files = @(Get-ChildItem dist -File | Where-Object { $_.Extension -in '.exe', '.zip' })
