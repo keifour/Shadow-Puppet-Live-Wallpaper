@@ -66,6 +66,9 @@ jobs:
           }
       - name: Generate checksums and verify outputs
         run: |
+          Get-ChildItem dist -File | Where-Object { $_.Extension -in '.exe', '.zip' } | ForEach-Object {
+            Rename-Item -LiteralPath $_.FullName -NewName $_.Name.Replace(' ', '.')
+          }
           $files = @(Get-ChildItem dist -File | Where-Object { $_.Extension -in '.exe', '.zip' })
           if (@($files | Where-Object Extension -eq '.exe').Count -ne 1) { throw 'Missing installer' }
           if (@($files | Where-Object Extension -eq '.zip').Count -ne 1) { throw 'Missing ZIP' }
