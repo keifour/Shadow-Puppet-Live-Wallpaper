@@ -8,7 +8,7 @@ let stream, theme = 0, sensitivity = .55, intensity = .7, paused = false, pointe
 let puppetMode = 3, previousMode = 3, transition = 1, presence = 0, facing = 1, previousCenter = .5;
 let manualMode = -1, wallpaperActive = false, demoAction = 'rise', latestAction = { ...window.SYMBOLS.rise, key: 'rise', stability: 1 };
 canvas.dataset.symbolMode = String(puppetMode);
-let noticeTimer;
+let noticeTimer, analysisTimer;
 function notice(text) { $('notice').textContent = text; $('notice').style.display = 'block'; clearTimeout(noticeTimer); noticeTimer = setTimeout(() => $('notice').style.display = 'none', 7000); }
 if (!gl) { notice('WebGL 不可用，请确认显卡驱动与硬件加速已启用。'); throw new Error('WebGL unavailable'); }
 const vertex = 'attribute vec2 p; void main(){gl_Position=vec4(p,0.,1.);}';
@@ -99,6 +99,7 @@ function startVision() {
   });
 }
 function stopCamera(message = '动作演示 · 点击动作卡，预览意象变化') {
+  clearInterval(analysisTimer); analysisTimer = null;
   const active = stream; stream = null;
   active?.getTracks().forEach(t => t.stop()); $('video').srcObject = null;
   stopVision(); motion = 0; resetAction(); $('action-help').textContent = '演示：点击动作卡预览；摄像头开启后由动作驱动。'; ctx.fillStyle = '#000'; ctx.fillRect(0,0,192,144);
@@ -114,6 +115,7 @@ $('camera').onclick = async () => {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('当前环境不支持摄像头');
     stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 15, max: 15 } } });
     $('video').srcObject = stream; await $('video').play();
+    analysisTimer = setInterval(() => { if (!paused) analyze(); }, 1000 / 15);
     stream.getVideoTracks()[0].onended = () => stopCamera('摄像头连接已断开 · 已切换演示');
     $('camera').textContent = '关闭摄像头 ◉'; $('recalibrate').disabled = false;
     $('status-dot').classList.add('live');
@@ -158,8 +160,8 @@ $('minimize').onclick=()=>window.desktop?.minimize();
 $('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'继续画面 ▷':'暂停画面 Ⅱ';};
 window.addEventListener('beforeunload',()=>stopCamera());
 canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();stopCamera();notice('图形上下文已丢失，请重启程序。');});
-let last=0,lastAnalyze=0,frames=0,fpsStart=0,elapsed=0;
-function frame(now){requestAnimationFrame(frame);if(now-last<1000/30)return;const realDt=(now-last)/1000;const dt=Math.min(realDt,.1);last=now;if(paused)return;elapsed+=dt;transition=Math.min(1,transition+realDt/1.1);if(now-lastAnalyze>1000/15){analyze();lastAnalyze=now;}if(!stream)motion*=.97;
+let last=0,frames=0,fpsStart=0,elapsed=0;
+function frame(now){requestAnimationFrame(frame);if(now-last<1000/30)return;const realDt=(now-last)/1000;const dt=Math.min(realDt,.1);last=now;if(paused)return;elapsed+=dt;transition=Math.min(1,transition+realDt/1.1);if(!stream)motion*=.97;
 const scale=Math.min(devicePixelRatio,1.25,1920/innerWidth,1080/innerHeight);const w=Math.round(innerWidth*scale),h=Math.round(innerHeight*scale);if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;gl.viewport(0,0,w,h);}
 gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,mask);gl.uniform2f(uniforms.resolution,w,h);gl.uniform2f(uniforms.pointer,...pointer);gl.uniform2f(uniforms.anchor,wallpaperActive?.24+pointer[0]*.52:.48+pointer[0]*.14,.42+pointer[1]*.12);gl.uniform1f(uniforms.time,elapsed);gl.uniform1f(uniforms.theme,theme);gl.uniform1f(uniforms.intensity,intensity);gl.uniform1f(uniforms.motion,motion);gl.uniform1f(uniforms.camera,stream?1:0);gl.uniform1f(uniforms.puppetMode,puppetMode);gl.uniform1f(uniforms.previousMode,previousMode);gl.uniform1f(uniforms.transition,transition);gl.uniform1f(uniforms.presence,stream?presence:1);gl.uniform1f(uniforms.facing,facing);gl.drawArrays(gl.TRIANGLES,0,6);frames++;if(now-fpsStart>1000){$('fps').textContent=Math.round(frames*1000/(now-fpsStart))+' FPS';frames=0;fpsStart=now;}}
 requestAnimationFrame(frame);

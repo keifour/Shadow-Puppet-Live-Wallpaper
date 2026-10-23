@@ -65,7 +65,7 @@ const { chromium } = require('playwright-core');
     await page.evaluate(() => {
       const camera=document.createElement('canvas');camera.width=192;camera.height=144;
       const context=camera.getContext('2d');
-      let currentPose='blank';
+      let currentPose='blank',posePhase=0;
       window.drawTestPose=kind=>{
         currentPose=kind;
         context.fillStyle='rgb(25,25,25)';context.fillRect(0,0,192,144);
@@ -74,6 +74,7 @@ const { chromium } = require('playwright-core');
         if(kind!=='blank'){rect(86,48,22,77);rect(85,29,24,24);}
         if(kind==='rise'){rect(58,10,9,65);rect(128,10,9,65);rect(62,64,72,10);}
         if(kind==='spread')rect(26,55,140,12);
+        if(kind==='wave'){const x=[28,48,68,108,145,118,98,58][posePhase++%8];rect(x,52,12,12);}
       };
       window.drawTestPose('blank');
       navigator.mediaDevices.getUserMedia=async()=>{
@@ -86,7 +87,7 @@ const { chromium } = require('playwright-core');
     });
     await page.locator('#camera').click();
     await page.waitForFunction(() => document.querySelector('#vision-state').textContent.includes('轮廓追踪'), null, {timeout:45000}).catch(async error => { console.error(await page.evaluate(()=>({state:document.querySelector('#vision-state').textContent,notice:document.querySelector('#notice').textContent,video:document.querySelector('#video').readyState}))); throw error; });
-    for(const [action,mode] of [['rise','3'],['spread','1']]){
+    for(const [action,mode] of [['rise','3'],['spread','1'],['wave','4']]){
       await page.evaluate(kind=>window.drawTestPose(kind), action);
       await page.waitForFunction(({action,mode}) => document.querySelector('#scene').dataset.action===action && document.querySelector('#scene').dataset.symbolMode===mode, {action,mode}, {timeout:30000});
       assert.equal(await page.locator('#puppet-mode').inputValue(), '-1');
@@ -101,6 +102,6 @@ const { chromium } = require('playwright-core');
     assert.equal(await page.evaluate(() => document.querySelector('#video').srcObject), null);
     assert.deepEqual(errors, []);
     assert.deepEqual(external, []);
-    console.log(JSON.stringify({ automaticVideoActions: ['rise -> bird', 'spread -> deer'], metrics, recalibration: true, cameraReleased: true, restart: true, workerFailureRecovery: true, errors }));
+    console.log(JSON.stringify({ automaticVideoActions: ['rise -> bird', 'spread -> deer', 'wave -> fish'], metrics, recalibration: true, cameraReleased: true, restart: true, workerFailureRecovery: true, errors }));
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -48,3 +48,11 @@ test('a waving hand is detected while the body centroid stays still',()=>{
   }
   assert.equal(result.key,'wave');
 });
+
+test('reentering after prolonged absence uses the normal gesture hold time',()=>{
+  const recognizer=new GestureRecognizer();
+  hold(recognizer,person('rise'));
+  for(let t=640;t<=4000;t+=80)recognizer.update({count:0,features:null,centroid:null},t);
+  const result=hold(recognizer,person('rise'),4080,4480);
+  assert.equal(result.key,'rise');
+});

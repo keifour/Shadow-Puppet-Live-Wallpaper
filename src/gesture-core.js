@@ -37,7 +37,7 @@
       const f=frame.features;
       if(!f||!frame.centroid||frame.count===0){
         this.history=[];this.lastSample=null;this.previousMask=null;this.candidate='still';this.since=now;
-        if(this.lastSeen!==null&&now-this.lastSeen>1800){this.current='still';this.changed=now;}
+        if(this.lastSeen!==null&&now-this.lastSeen>1800&&this.current!=='still'){this.current='still';this.changed=now;}
         return this.result(this.current,0,0,false);
       }
       this.lastSeen=now;

@@ -47,7 +47,7 @@ app.whenReady().then(() => {
     callback(contents === win?.webContents && permission === 'media' && details.mediaTypes?.every(t => t === 'video'));
   });
   session.defaultSession.setPermissionCheckHandler((contents, permission, origin, details) => contents === win?.webContents && permission === 'media' && details.mediaType === 'video');
-  win = new BrowserWindow({ width: 1280, height: 820, minWidth: 850, minHeight: 620, backgroundColor: '#080d13', autoHideMenuBar: true, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  win = new BrowserWindow({ width: 1280, height: 820, minWidth: 850, minHeight: 620, backgroundColor: '#080d13', autoHideMenuBar: true, webPreferences: { backgroundThrottling: false, preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   win.loadFile(page);
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', e => e.preventDefault());
