@@ -28,17 +28,18 @@ const { chromium } = require('playwright-core');
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     const modeImages = [];
     await page.mouse.move(780, 400);
-    for (const mode of ['0', '1', '2']) {
+    for (const mode of ['3', '4', '1']) {
       await page.locator('#puppet-mode').selectOption(mode);
-      await page.waitForTimeout(400);
+      await page.waitForTimeout(1400);
       modeImages.push(await page.locator('#scene').screenshot({ path: path.join(require('node:os').tmpdir(), `shadow-puppet-mode-${mode}.png`) }));
     }
     assert.ok(!modeImages[0].equals(modeImages[1]) && !modeImages[1].equals(modeImages[2]), 'puppet modes should render different scenes');
-    await page.locator('#puppet-mode').selectOption('0');
+    await page.locator('#puppet-mode').selectOption('-1');
     await page.locator('#camera').click();
     await page.waitForFunction(() => document.querySelector('#vision-state').textContent.includes('轮廓追踪'), null, { timeout: 45000 }).catch(async error => { console.error(await page.locator('#notice').textContent(), await page.locator('#vision-state').textContent()); throw error; });
     await page.waitForFunction(() => Number(document.querySelector('#mask').dataset.contours) > 0);
     const metrics = await page.locator('#vision-metrics').textContent();
+    assert.equal(await page.locator('[data-demo-action=rise]').isDisabled(), true);
     await page.locator('[data-theme="2"]').click();
     assert.equal(await page.locator('.theme.active').getAttribute('data-theme'), '2');
     await page.locator('#pause').click();
@@ -55,14 +56,51 @@ const { chromium } = require('playwright-core');
     await page.locator('#camera').click();
     await page.waitForFunction(() => document.querySelector('#status-dot').classList.contains('live'));
     await page.locator('#camera').click();
+    await page.locator('[data-demo-action=wave]').click();
+    await page.waitForFunction(() => document.querySelector('#scene').dataset.symbolMode === '4');
+    assert.ok((await page.locator('#action-label').textContent()).includes('演示'));
+    assert.equal(await page.locator('#puppet-mode').inputValue(), '-1');
     assert.deepEqual(errors, []);
     assert.deepEqual(external, [], 'camera analysis must make no external requests');
+    await page.evaluate(() => {
+      const camera=document.createElement('canvas');camera.width=192;camera.height=144;
+      const context=camera.getContext('2d');
+      let currentPose='blank';
+      window.drawTestPose=kind=>{
+        currentPose=kind;
+        context.fillStyle='rgb(25,25,25)';context.fillRect(0,0,192,144);
+        context.fillStyle='rgb(235,235,235)';
+        const rect=(...args)=>context.fillRect(...args);
+        if(kind!=='blank'){rect(86,48,22,77);rect(85,29,24,24);}
+        if(kind==='rise'){rect(58,10,9,65);rect(128,10,9,65);rect(62,64,72,10);}
+        if(kind==='spread')rect(26,55,140,12);
+      };
+      window.drawTestPose('blank');
+      navigator.mediaDevices.getUserMedia=async()=>{
+        const stream=camera.captureStream(15);
+        const timer=setInterval(()=>window.drawTestPose(currentPose),66);
+        const track=stream.getVideoTracks()[0],stop=track.stop.bind(track);
+        track.stop=()=>{clearInterval(timer);stop();};
+        return stream;
+      };
+    });
+    await page.locator('#camera').click();
+    await page.waitForFunction(() => document.querySelector('#vision-state').textContent.includes('轮廓追踪'), null, {timeout:45000}).catch(async error => { console.error(await page.evaluate(()=>({state:document.querySelector('#vision-state').textContent,notice:document.querySelector('#notice').textContent,video:document.querySelector('#video').readyState}))); throw error; });
+    for(const [action,mode] of [['rise','3'],['spread','1']]){
+      await page.evaluate(kind=>window.drawTestPose(kind), action);
+      await page.waitForFunction(({action,mode}) => document.querySelector('#scene').dataset.action===action && document.querySelector('#scene').dataset.symbolMode===mode, {action,mode}, {timeout:30000});
+      assert.equal(await page.locator('#puppet-mode').inputValue(), '-1');
+      assert.ok((await page.locator('#action-label').textContent()).includes('轮廓感应'));
+    }
+    await page.locator('#camera').click();
     // A missing runtime must show a recoverable error and release camera resources.
     await page.route('**/vision-worker.js', route => route.abort());
     await page.locator('#camera').click();
     await page.waitForFunction(() => document.querySelector('#notice').textContent.includes('无法开启摄像头'));
     assert.equal(await page.locator('#camera').isDisabled(), false);
     assert.equal(await page.evaluate(() => document.querySelector('#video').srcObject), null);
-    console.log(JSON.stringify({ metrics, recalibration: true, cameraReleased: true, restart: true, workerFailureRecovery: true, errors }));
+    assert.deepEqual(errors, []);
+    assert.deepEqual(external, []);
+    console.log(JSON.stringify({ automaticVideoActions: ['rise -> bird', 'spread -> deer'], metrics, recalibration: true, cameraReleased: true, restart: true, workerFailureRecovery: true, errors }));
   } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

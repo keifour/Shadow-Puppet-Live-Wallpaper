@@ -62,3 +62,18 @@ test('sensitivity changes rebuild the background model and suppress calibration 
     assert.equal(p.process(frame([[70,40,50,60]]), .9).count, 1);
   } finally { p.delete(); }
 });
+
+test('OpenCV video masks feed a hand wave into the fish action while the body stays fixed', async()=>{
+  const {cv}=await runtime;
+  const {GestureRecognizer,silhouetteFeatures}=require('../src/gesture-core.js');
+  const processor=new ContourProcessor(cv),actions=new GestureRecognizer();
+  try {
+    calibrate(processor);let action;
+    const positions=[28,48,68,108,145,118,98,58,28,48,68,108,145,118,98,58,28,48,68,108,145];
+    positions.forEach((x,i)=>{
+      const result=processor.process(frame([[86,48,22,77],[85,29,24,24],[x,52,12,12]]));
+      action=actions.update({...result,features:silhouetteFeatures(result.mask,192,144)},i*80);
+    });
+    assert.equal(action.key,'wave');assert.equal(action.mode,4);
+  } finally {processor.delete();}
+});
