@@ -4,7 +4,7 @@ const canvas = $('scene'), gl = canvas.getContext('webgl', { alpha: false, antia
 const mask = $('mask'), ctx = mask.getContext('2d', { willReadFrequently: true });
 const capture = document.createElement('canvas'); capture.width = 192; capture.height = 144;
 const cc = capture.getContext('2d', { willReadFrequently: true });
-let stream, theme = 0, sensitivity = .55, intensity = .7, paused = false, pointer = [.5, .5], motion = 0, previous, cameraBusy = false;
+let stream, theme = 0, sensitivity = .55, intensity = .7, paused = false, pointer = [.5, .5], motion = 0, cameraBusy = false;
 let noticeTimer;
 function notice(text) { $('notice').textContent = text; $('notice').style.display = 'block'; clearTimeout(noticeTimer); noticeTimer = setTimeout(() => $('notice').style.display = 'none', 7000); }
 if (!gl) { notice('WebGL 不可用，请确认显卡驱动与硬件加速已启用。'); throw new Error('WebGL unavailable'); }
@@ -33,12 +33,93 @@ const position = gl.getAttribLocation(program, 'p'); gl.enableVertexAttribArray(
 const uniforms = Object.fromEntries(['resolution','pointer','time','theme','intensity','motion','camera','silhouette'].map(n=>[n, gl.getUniformLocation(program,n)]));
 const texture = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, texture); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); gl.uniform1i(uniforms.silhouette,0);
 ctx.fillStyle='#000'; ctx.fillRect(0,0,192,144);
-function stopCamera(message = '演示模式 · 移动鼠标，唤起涟漪') { const active = stream; stream = null; active?.getTracks().forEach(t=>t.stop()); $('video').srcObject = null; previous = null; motion = 0; ctx.fillStyle='#000'; ctx.fillRect(0,0,192,144); $('camera').textContent='开启摄像头 ↗'; $('camera-label').textContent='摄像头尚未开启'; $('status').textContent=message; $('status-dot').classList.remove('live'); }
-$('camera').onclick=async()=>{ if(cameraBusy)return; if(stream){stopCamera();return;} cameraBusy=true; $('camera').disabled=true;
-try { if (!navigator.mediaDevices?.getUserMedia) throw new Error('当前环境不支持摄像头'); stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{width:{ideal:320},height:{ideal:240},frameRate:{ideal:15,max:15}}}); $('video').srcObject=stream; await $('video').play(); stream.getVideoTracks()[0].onended=()=>stopCamera('摄像头连接已断开 · 已切换演示'); $('camera').textContent='关闭摄像头 ◉'; $('camera-label').textContent='本地轮廓分析中'; $('status').textContent='摄像头已连接 · 挥动双手，让光影生长'; $('status-dot').classList.add('live'); } catch(e) {stopCamera();notice(`无法开启摄像头：${e.message}。可继续使用鼠标演示。`);} finally {cameraBusy=false; $('camera').disabled=false;} };
-function analyze(){ if(!stream||$('video').readyState<2)return; cc.save(); cc.translate(192,0); cc.scale(-1,1); cc.drawImage($('video'),0,0,192,144); cc.restore(); const input=cc.getImageData(0,0,192,144), out=ctx.createImageData(192,144), gray=new Uint8Array(192*144); let count=0,xsum=0,ysum=0; const threshold=40-sensitivity*34;
-for(let i=0;i<gray.length;i++){const j=i*4;gray[i]=input.data[j]*.299+input.data[j+1]*.587+input.data[j+2]*.114;const diff=previous?Math.abs(gray[i]-previous[i]):0; const v=diff>threshold?255:0;out.data[j]=out.data[j+1]=out.data[j+2]=v;out.data[j+3]=255;if(v){count++;xsum+=i%192;ysum+=Math.floor(i/192);}}
-previous=gray;ctx.putImageData(out,0,0);motion=motion*.7+Math.min(count/1800,1)*.3;if(count>30){pointer[0]=pointer[0]*.7+xsum/count/192*.3;pointer[1]=pointer[1]*.7+(1-ysum/count/144)*.3;}}
+let visionWorker = null, visionReady = false, visionBusy = false, visionTimer;
+function stopVision() {
+  clearTimeout(visionTimer);
+  visionWorker?.terminate(); visionWorker = null; visionReady = false; visionBusy = false;
+  $('vision-state').textContent = 'OpenCV · 待机';
+  $('vision-metrics').textContent = '离线分析 · 独立线程';
+  $('recalibrate').disabled = true;
+  mask.dataset.contours = '0'; mask.dataset.coverage = '0';
+}
+function startVision() {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker('vision-worker.js'); visionWorker = worker;
+    let initialized = false;
+    $('vision-state').textContent = 'OpenCV 引擎加载中';
+    function failed(message) {
+      if (worker !== visionWorker) return;
+      if (!initialized) { stopVision(); reject(new Error(message)); }
+      else { stopCamera(); notice(`轮廓分析已停止：${message}。可重新开启摄像头。`); }
+    }
+    visionTimer = setTimeout(() => failed('OpenCV 初始化超时'), 20000);
+    worker.onerror = event => { event.preventDefault(); failed(event.message || 'OpenCV Worker 加载失败'); };
+    worker.onmessage = ({ data }) => {
+      if (worker !== visionWorker) return;
+      if (data.type === 'error') return failed(data.message);
+      if (data.type === 'ready') {
+        clearTimeout(visionTimer); initialized = true; visionReady = true;
+        $('vision-state').textContent = 'OpenCV · 已就绪'; resolve(); return;
+      }
+      if (data.type !== 'result') return;
+      visionBusy = false;
+      if (!stream || paused) return;
+      const out = ctx.createImageData(192, 144);
+      for (let i = 0; i < data.mask.length; i++) {
+        out.data[i*4] = out.data[i*4+1] = out.data[i*4+2] = data.mask[i]; out.data[i*4+3] = 255;
+      }
+      ctx.putImageData(out, 0, 0);
+      mask.dataset.contours = String(data.count); mask.dataset.coverage = String(data.coverage);
+      motion = motion * .7 + Math.min(data.coverage * 5, 1) * .3;
+      if (data.centroid) {
+        pointer[0] = pointer[0] * .7 + data.centroid[0] * .3;
+        pointer[1] = pointer[1] * .7 + data.centroid[1] * .3;
+      }
+      $('vision-state').textContent = data.calibrating ? `采集背景 ${Math.round(data.progress * 100)}%` : 'OpenCV · 轮廓追踪中';
+      $('vision-metrics').textContent = data.calibrating ? '请暂时离开画面，保持摄像头静止' : `${data.count} 个轮廓 · ${(data.coverage*100).toFixed(1)}% · ${data.ms.toFixed(0)} ms`;
+      $('camera-label').textContent = data.calibrating ? '正在采集背景' : '本地 OpenCV 分析中';
+      $('status').textContent = data.calibrating ? '背景采集中 · 请暂时离开画面' : '摄像头已连接 · 挥动双手，让光影生长';
+    };
+  });
+}
+function stopCamera(message = '演示模式 · 移动鼠标，唤起涟漪') {
+  const active = stream; stream = null;
+  active?.getTracks().forEach(t => t.stop()); $('video').srcObject = null;
+  stopVision(); motion = 0; ctx.fillStyle = '#000'; ctx.fillRect(0,0,192,144);
+  $('camera').textContent = '开启摄像头 ↗'; $('camera-label').textContent = '摄像头尚未开启';
+  $('status').textContent = message; $('status-dot').classList.remove('live');
+}
+$('camera').onclick = async () => {
+  if (cameraBusy) return;
+  if (stream) { stopCamera(); return; }
+  cameraBusy = true; $('camera').disabled = true;
+  try {
+    await startVision();
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('当前环境不支持摄像头');
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 15, max: 15 } } });
+    $('video').srcObject = stream; await $('video').play();
+    stream.getVideoTracks()[0].onended = () => stopCamera('摄像头连接已断开 · 已切换演示');
+    $('camera').textContent = '关闭摄像头 ◉'; $('recalibrate').disabled = false;
+    $('status-dot').classList.add('live');
+  } catch (error) { stopCamera(); notice(`无法开启摄像头：${error.message}。可继续使用鼠标演示。`); }
+  finally { cameraBusy = false; $('camera').disabled = false; }
+};
+$('recalibrate').onclick = () => {
+  if (!visionReady || !stream) return;
+  visionWorker.postMessage({ type: 'reset' });
+  ctx.fillStyle = '#000'; ctx.fillRect(0,0,192,144); motion = 0;
+  $('vision-state').textContent = '背景已重置';
+  notice('请暂时离开画面并保持摄像头静止，约 2 秒后进入皮影模式。');
+};
+function analyze() {
+  if (!stream || !visionReady || visionBusy || $('video').readyState < 2) return;
+  try {
+    cc.save(); cc.translate(192,0); cc.scale(-1,1); cc.drawImage($('video'),0,0,192,144); cc.restore();
+    const input = cc.getImageData(0,0,192,144);
+    visionBusy = true;
+    visionWorker.postMessage({ type: 'frame', buffer: input.data.buffer, sensitivity }, [input.data.buffer]);
+  } catch (error) { stopCamera(); notice(`摄像头画面分析失败：${error.message}`); }
+}
 document.querySelectorAll('.theme').forEach(button=>button.onclick=()=>{ theme=Number(button.dataset.theme);document.querySelector('.theme.active').classList.remove('active');button.classList.add('active');});
 for(const name of ['sensitivity','intensity']) $(name).oninput=e=>{ const value=Number(e.target.value);$(name+'-value').textContent=value+'%';if(name==='sensitivity')sensitivity=value/100;else intensity=value/100;};
 window.addEventListener('pointermove',e=>{if(!stream){pointer=[e.clientX/innerWidth,1-e.clientY/innerHeight];motion=.25;}});

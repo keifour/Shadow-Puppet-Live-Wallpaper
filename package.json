@@ -1,17 +1,22 @@
 {
   "name": "shadow-puppet-live-wallpaper",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "本地摄像头驱动的赛博水墨皮影桌面",
   "main": "src/main.cjs",
   "scripts": {
     "start": "electron .",
-    "check": "node --check src/main.cjs && node --check src/preload.cjs && node --check src/renderer.js",
+    "check": "node --check src/main.cjs && node --check src/preload.cjs && node --check src/renderer.js && node --check src/vision-core.js && node --check src/vision-worker.js",
     "dist:win": "electron-builder --win nsis --x64",
-    "dist:win:zip": "electron-builder --win zip --x64 --config.win.signAndEditExecutable=false"
+    "dist:win:zip": "electron-builder --win zip --x64 --config.win.signAndEditExecutable=false",
+    "postinstall": "node scripts/prepare-opencv.cjs",
+    "test": "node --test tests/vision.test.cjs",
+    "test:ui": "node tests/renderer-smoke.cjs"
   },
   "devDependencies": {
+    "@techstark/opencv-js": "4.12.0-release.1",
     "electron": "^39.0.0",
-    "electron-builder": "^26.0.12"
+    "electron-builder": "^26.0.12",
+    "playwright-core": "1.64.1"
   },
   "build": {
     "appId": "studio.shadowpuppet.desktop",

@@ -1,6 +1,6 @@
 # Shadow Puppet · 摄像头皮影戏壁纸
 
-Windows 桌面应用原型。Electron 承载 WebGL 山水幕布，用本地帧差分析提取运动剪影，驱动光晕与涟漪。提供青山墨流、霓虹夜行、朱砂余烬三种配色。当前使用轻量帧差算法，尚未实现人体骨骼识别、动物识别或手势到角色的语义映射。
+Windows 桌面应用。Electron 承载 WebGL 山水幕布，OpenCV.js 在本地独立 Worker 中提取运动前景与填充剪影，驱动光晕和涟漪。提供青山墨流、霓虹夜行、朱砂余烬三种配色。
 
 ## Windows 开发
 
@@ -11,30 +11,56 @@ npm ci
 npm start
 ```
 
-默认进入鼠标交互演示；点击“开启摄像头”后授权。摄像头仅用于本地运动分析，不采集音频，不录制或上传画面。灵敏度控制帧差阈值；移动的背景、光照变化也会触发效果。暂停画面会暂停分析，但不会释放摄像头；点击“关闭摄像头”或从托盘退出可释放设备。
+`npm ci` 会自动将固定版本 OpenCV.js 4.12 和许可复制到 `src/vendor/`，打包后完全离线运行，无需 Python、摄像头服务或额外安装 OpenCV。生成目录不提交到 Git；不要跳过 postinstall。如果曾使用 `--ignore-scripts`，请执行 `node scripts/prepare-opencv.cjs`。
 
-“设为桌面壁纸”通过系统 PowerShell 调用 user32，将窗口挂到 Explorer WorkerW 后面。该模式隐藏控制面板，从系统托盘菜单“打开控制台”恢复。关闭窗口将驻留托盘，摄像头可能继续工作；彻底退出请使用托盘“退出”。桌面模式目前仅覆盖主显示器，不支持多屏独立设置或开机自启。Explorer 重启或部分 Windows 桌面布局可能使嵌入失效；退出并重开应用恢复。此接口并非 Windows 官方稳定壁纸 API，失败时会显示错误，窗口预览仍可用。
+默认进入鼠标演示；点击“开启摄像头”后授权。**请先离开摄像头画面并保持镜头静止**，等待 30 帧背景采集完成，再进入画面互动（目标分析帧率下约 2 秒，低性能设备更久）。调节灵敏度会重新采集背景。移动摄像头、明显改变光照或需要消除残影时，点击“重新采集背景”，并暂时离开画面。
+
+摄像头仅用于本地轮廓分析，不采集音频，不录制或上传画面。暂停画面会暂停分析，但不会释放摄像头；点击“关闭摄像头”会释放设备并终止 OpenCV Worker，重新开启时会建立新背景模型。
+
+## OpenCV 处理流程
+
+1. 镜像摄像头画面并缩小至 192 × 144；只允许一个待处理帧，避免积压。
+2. 灰度转换和 5 × 5 高斯模糊。
+3. MOG2 自适应背景分离，关闭阴影分类；采集背景时不显示前景。
+4. 3 × 3 椭圆核开运算去噪、闭运算连接轮廓。
+5. 外轮廓检测、按面积过滤碎片，生成实心剪影纹理。
+6. 轮廓矩计算重心，以前景覆盖率驱动 WebGL 光影。
+
+界面显示轮廓数、前景覆盖率及每帧 OpenCV 处理耗时。这里的耗时不包含摄像头采集、线程传输或 GPU 绘制，不能等同于总帧率。
+
+这是**运动前景分离**，不是人体或物体语义识别。它不识别鹿、猫、手势、人体骨骼；屏幕闪烁、光照突变和移动的背景也可能成为前景。MOG2 会缓慢适应环境，长时间静止的物体可能逐渐融入背景。背景采集时留在画面里的人也会被当作背景。摄像头只能观察图像中的光影，不能从单个镜头恢复真实物理阴影或物体身份。
+
+## 桌面模式
+
+“设为桌面壁纸”通过系统 PowerShell 调用 user32，将窗口挂到 Explorer WorkerW 后面。该模式隐藏控制面板，从系统托盘菜单“打开控制台”恢复。关闭窗口将驻留托盘，摄像头可能继续工作；彻底退出请使用托盘“退出”。
+
+当前仅覆盖主显示器，不支持多屏独立设置或开机自启。Explorer 重启或部分 Windows 桌面布局可能使嵌入失效；退出并重开应用恢复。WorkerW 并非 Windows 官方稳定壁纸 API，失败时会显示错误，窗口预览仍可用。
 
 ## 检查与打包
 
 ```powershell
 npm run check
+npm test
+# 浏览器集成测试，需已安装 Chromium / Chrome
+# Windows PowerShell 示例：
+$env:CHROMIUM_EXECUTABLE = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+npm run test:ui
 npm run dist:win
-# Linux 上生成免安装 ZIP（无需 Wine，未签名）
+```
+
+Linux 云环境默认使用 `/usr/bin/chromium` 执行 UI 测试；可用 `CHROMIUM_EXECUTABLE` 覆盖路径。UI 测试自行启动并关闭本地 HTTP 服务，使用软件 WebGL 和模拟摄像头，无需实体摄像头。
+
+```bash
+# Linux 上生成 Windows x64 免安装 ZIP（无需 Wine，未签名）
 npm run dist:win:zip
 ```
 
-安装包输出到 `dist/`。当前未配置代码签名，正式发行前应添加签名并完成 Windows 实机验证。Linux 可以验证渲染与 JavaScript；Windows 安装包优先在 Windows 构建，跨平台生成 NSIS 可能需要 Wine。
+输出在 `dist/`。Windows NSIS 安装包优先在 Windows 构建，Linux 跨平台生成 NSIS 需要 Wine。当前未配置代码签名，使用默认 Electron 图标，仍是开发原型。
 
-## 实现边界
+## 验证范围
 
-- 不需要 API 密钥、远端服务、Python、OpenCV 或 MediaPipe。
-- 渲染限制约 30 FPS，摄像头分析约 15 FPS，分析分辨率为 192 × 144；实际帧率取决于显卡。
-- 网页内容启用 CSP、沙箱、上下文隔离，页面无 Node.js 权限；原生功能通过固定 IPC 暴露。
-- Windows 桌面挂载与摄像头权限必须在 Windows 实机测试，Linux 渲染验证不能替代该检查。
-
-## 当前验证记录
-
-Linux 云环境已通过 `npm ci`、`npm run check`，并通过 Chromium 软件 WebGL + 模拟摄像头验证：页面无 JavaScript 异常、场景切换、运动剪影生成、摄像头释放、暂停及桌面模式提示。软件渲染测试约 9 FPS，不代表 Windows GPU 性能；30 FPS 为限帧目标。
-
-云环境缺少 Wine，NSIS 安装包构建未通过；免安装 ZIP 使用 `dist:win:zip` 构建。Windows 真机摄像头、Electron 权限、托盘和 WorkerW 挂载/还原仍未验证。ZIP 未签名，使用默认 Electron 图标，属于开发原型。
+- 算法测试使用真实 OpenCV WASM，验证背景抑制、填充轮廓、重心、短时间静止前景、噪点过滤、多物体、背景重置和灵敏度切换。
+- Chromium 集成测试覆盖 OpenCV Worker 初始化、模拟摄像头轮廓、场景切换、暂停、背景重采集、摄像头释放/重启及 Worker 加载失败恢复。
+- 分析目标约 15 FPS，WebGL 限帧约 30 FPS，实际性能取决于设备。
+- 渲染页面保持沙箱与上下文隔离，页面无 Node.js 权限；OpenCV WASM 在独立 Worker 中运行，运行时资产随安装包分发。
+- Windows 实机摄像头、Electron 权限、托盘和 WorkerW 挂载/还原尚未验证；Linux 算法与渲染验证不能替代这些检查。
