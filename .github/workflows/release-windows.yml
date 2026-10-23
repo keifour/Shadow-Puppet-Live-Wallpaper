@@ -55,7 +55,7 @@ jobs:
       - run: npm test
       - name: Build Windows installer and ZIP
         run: |
-          & npx --no-install electron-builder --win nsis zip --x64 2>&1 | Tee-Object -FilePath build-windows.log
+          & npx --no-install electron-builder --win nsis zip --x64 --publish never 2>&1 | Tee-Object -FilePath build-windows.log
           $buildExit = $LASTEXITCODE
           if ($buildExit -ne 0) {
             $message = (Get-Content build-windows.log -Tail 60) -join "`n"
